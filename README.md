@@ -1,25 +1,52 @@
 # Stock Decision Journal
 
-Investment memory system for recording why a position was opened, what would invalidate the thesis, and how the decision changes over time.
+A decision-memory app for long-term investors. It records why a position was opened, what would invalidate the thesis, how the thesis changes over time, and what decision followed each review.
 
-## MVP v0.2
+## v0.2 architecture
 
-- Portfolio positions
-- Investment theses
-- Append-only thesis versions
-- Thesis break conditions
-- 30/60/90-day reviews
-- Decision history: Buy More / Hold / Reduce / Exit
-- Supabase PostgreSQL schema with Row Level Security
+- React + Vite frontend
+- Supabase Auth + PostgreSQL
+- Row Level Security for per-user data isolation
+- Append-only thesis version history
+- Structured 30/60/90-day review records
 
-## Stack
+## Core model
 
-- React + Vite
-- Supabase PostgreSQL + Auth
-- CSS
+`Position -> Thesis -> Thesis Versions -> Break Conditions -> Reviews -> Decisions`
 
-## Core principle
+A thesis version is never overwritten. When a thesis changes, insert a new row in `thesis_versions` with the next `version_number` and a reason for change.
 
-> Every position should have a reason to own it and a reason to sell it.
+## Current app state
 
-Historical thesis versions are preserved instead of overwritten so future reviews can compare current thinking with the original decision.
+The UI is runnable now and still stores prototype data in browser LocalStorage. The Supabase client and production database schema are already in the repository, so the next step is to add authentication and replace LocalStorage reads/writes with Supabase data access.
+
+```bash
+npm install
+npm run dev
+```
+
+## Supabase setup
+
+1. Create a new Supabase project.
+2. Run `supabase/schema.sql` in the SQL editor.
+3. Copy `.env.example` to `.env.local`.
+4. Fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+5. Start the app with `npm run dev`.
+
+## Thesis states
+
+- `STRENGTHENING`
+- `VALID`
+- `WEAKENING`
+- `BROKEN`
+
+## Decision states
+
+- `BUY MORE`
+- `HOLD`
+- `REDUCE`
+- `EXIT`
+
+## Product rule
+
+> Never rewrite the old thesis. Add a new thesis version.
