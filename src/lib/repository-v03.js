@@ -28,6 +28,7 @@ const mapPosition = (row) => {
     thesisStatus: row.current_thesis_status,
     decision: row.current_decision,
     nextReview: row.next_review_date,
+    closedAt: row.closed_at || null,
     thesisId: thesis?.id || null,
     thesis: versions[0]?.thesis_text || '',
     expected: versions[0]?.expected_outcome || '',
@@ -150,4 +151,27 @@ export async function createReview(userId, position, review) {
     closed_at: review.decision === 'EXIT' ? new Date().toISOString() : null,
   }).eq('id', position.id);
   if (positionError) throw positionError;
+}
+
+export async function closePosition(userId, position) {
+  const now = new Date().toISOString();
+  const { error: decisionError } = await supabase.from('decisions').insert({
+    user_id: userId,
+    position_id: position.id,
+    decision: 'EXIT',
+    rationale: 'Position closed manually',
+  });
+  if (decisionError) throw decisionError;
+  const { error } = await supabase.from('positions').update({
+    current_decision: 'EXIT',
+    closed_at: now,
+    next_review_date: null,
+    updated_at: now,
+  }).eq('id', position.id);
+  if (error) throw error;
+}
+
+export async function deletePosition(positionId) {
+  const { error } = await supabase.from('positions').delete().eq('id', positionId);
+  if (error) throw error;
 }
