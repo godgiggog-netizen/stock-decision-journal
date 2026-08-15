@@ -1,0 +1,104 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import './v03.css';
+import { isSupabaseConfigured } from './lib/supabase';
+import { createPosition, createReview, getSession, listPositions, onAuthStateChange, signIn, signOut, signUp } from './lib/repository-v03';
+
+const todayISO = () => new Date().toISOString().slice(0,10);
+const daysUntil = (date) => date ? Math.ceil((new Date(`${date}T00:00:00`) - new Date(`${todayISO()}T00:00:00`))/86400000) : null;
+
+function App(){
+  const [session,setSession]=useState(null);
+  const [ready,setReady]=useState(!isSupabaseConfigured);
+  const [positions,setPositions]=useState([]);
+  const [view,setView]=useState('dashboard');
+  const [selectedId,setSelectedId]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+
+  useEffect(()=>{
+    if(!isSupabaseConfigured) return;
+    getSession().then(s=>{setSession(s);setReady(true)}).catch(e=>{setError(e.message);setReady(true)});
+    const {data}=onAuthStateChange(setSession);
+    return ()=>data.subscription.unsubscribe();
+  },[]);
+  useEffect(()=>{ if(session?.user) refresh(); else setPositions([]); },[session?.user?.id]);
+
+  async function refresh(){
+    try{setBusy(true);setPositions(await listPositions())}catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+  async function addPosition(input){
+    try{setBusy(true);setError('');const id=await createPosition(session.user.id,input);await refresh();setSelectedId(id);setView('detail')}catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+  async function saveReview(review){
+    try{setBusy(true);setError('');await createReview(session.user.id,selected,review);await refresh();setView('detail')}catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+  const selected=positions.find(p=>p.id===selectedId)||positions[0];
+  const due=useMemo(()=>positions.filter(p=>p.nextReview&&daysUntil(p.nextReview)<=0),[positions]);
+  const soon=useMemo(()=>positions.filter(p=>p.nextReview&&daysUntil(p.nextReview)>0&&daysUntil(p.nextReview)<=7),[positions]);
+  const counts={active:positions.filter(p=>p.decision!=='EXIT').length,valid:positions.filter(p=>['VALID','STRENGTHENING'].includes(p.thesisStatus)).length,risk:positions.filter(p=>p.thesisStatus==='WEAKENING').length,due:due.length};
+
+  if(!ready) return <div className="center">Loading…</div>;
+  if(isSupabaseConfigured&&!session) return <Auth error={error} setError={setError}/>;
+
+  return <div className="shell">
+    <aside className="nav">
+      <div className="logo">📘<span>Stock Decision<br/>Journal</span></div>
+      <button className={view==='dashboard'?'active':''} onClick={()=>setView('dashboard')}>Dashboard</button>
+      <button className={view==='new'?'active':''} onClick={()=>setView('new')}>+ New Decision</button>
+      <button className={view==='review'?'active':''} disabled={!selected} onClick={()=>setView('review')}>Review</button>
+      <button className="signout" onClick={()=>signOut()}>Sign out</button>
+    </aside>
+    <main className="main">
+      {error&&<div className="error">{error}</div>}
+      {busy&&<div className="loading">Syncing…</div>}
+      {view==='dashboard'&&<Dashboard positions={positions} counts={counts} due={due} soon={soon} onNew={()=>setView('new')} onOpen={id=>{setSelectedId(id);setView('detail')}}/>}
+      {view==='new'&&<NewDecision onSave={addPosition} onCancel={()=>setView('dashboard')}/>} 
+      {view==='detail'&&selected&&<DecisionCard p={selected} onBack={()=>setView('dashboard')} onReview={()=>setView('review')}/>} 
+      {view==='review'&&selected&&<Review p={selected} onSave={saveReview} onCancel={()=>setView('detail')}/>} 
+    </main>
+  </div>
+}
+
+function Auth({error,setError}){
+  const [mode,setMode]=useState('signin'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false);
+  async function submit(e){e.preventDefault();setBusy(true);setError('');setMsg('');try{if(mode==='signin')await signIn(email,password);else{const d=await signUp(email,password);if(!d.session)setMsg('Account created. Check your email to confirm, then sign in.')}}catch(err){setError(err.message)}finally{setBusy(false)}}
+  return <div className="auth"><form className="authcard" onSubmit={submit}><div className="authlogo">📘 Stock Decision Journal</div><h1>{mode==='signin'?'Sign in':'Create account'}</h1><p>Keep the reason behind every investment decision.</p>{error&&<div className="error">{error}</div>}{msg&&<div className="success">{msg}</div>}<Field label="Email"><input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></Field><Field label="Password"><input type="password" minLength="6" required value={password} onChange={e=>setPassword(e.target.value)}/></Field><button className="primary full" disabled={busy}>{busy?'Please wait…':mode==='signin'?'Sign in':'Create account'}</button><button type="button" className="link switch" onClick={()=>setMode(mode==='signin'?'signup':'signin')}>{mode==='signin'?'Need an account? Sign up':'Already have an account? Sign in'}</button></form></div>
+}
+
+function Dashboard({positions,counts,due,soon,onNew,onOpen}){
+  return <><header className="head"><div><h1>Dashboard</h1><p>Review the thesis before the price changes your story.</p></div><button className="primary" onClick={onNew}>+ New Decision</button></header>
+    {(due.length>0||soon.length>0)&&<section className="reminders"><h2>Review reminders</h2>{due.map(p=><Reminder key={p.id} p={p} urgent onOpen={onOpen}/>)}{soon.map(p=><Reminder key={p.id} p={p} onOpen={onOpen}/>)}</section>}
+    <div className="metrics"><Metric label="Active Positions" value={counts.active}/><Metric label="Thesis Valid" value={counts.valid}/><Metric label="At Risk" value={counts.risk}/><Metric label="Review Due" value={counts.due}/></div>
+    <section className="panel"><h2>My Positions</h2>{positions.length===0?<div className="empty"><p>No investment decisions yet.</p><button className="primary" onClick={onNew}>Record your first decision</button></div>:<div className="cards">{positions.map(p=><article className="position" key={p.id}><div><strong className="ticker">{p.ticker}</strong><small>{p.company||'Company not set'}</small></div><Status value={p.thesisStatus}/><div><span className="label">Entry</span><b>${p.entryPrice.toFixed(2)}</b></div><div><span className="label">Next review</span><b>{p.nextReview||'—'}</b></div><button className="ghost" onClick={()=>onOpen(p.id)}>View</button></article>)}</div>}</section>
+  </>
+}
+const Reminder=({p,urgent,onOpen})=><div className={'reminder '+(urgent?'urgent':'')}><div><b>{p.ticker}</b><span>{urgent?'Review is due':`Review in ${daysUntil(p.nextReview)} day${daysUntil(p.nextReview)===1?'':'s'}`}</span></div><button onClick={()=>onOpen(p.id)}>Open</button></div>;
+const Metric=({label,value})=><div className="metric"><span>{label}</span><strong>{value}</strong></div>;
+const Status=({value})=><span className={'status '+value.toLowerCase()}>{value}</span>;
+const Field=({label,children})=><label className="field"><span>{label}</span>{children}</label>;
+
+function NewDecision({onSave,onCancel}){
+  const [f,setF]=useState({ticker:'',company:'',buyDate:todayISO(),entryPrice:'',amount:'',horizon:'12 months',reviewPlan:30,target:'',thesis:'',expected:'',breakCondition:''});
+  const [validation,setValidation]=useState('');
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  function submit(e){e.preventDefault();const missing=[];if(!f.ticker)missing.push('Ticker');if(!f.entryPrice)missing.push('Entry price');if(!f.amount)missing.push('Amount invested');if(!f.thesis)missing.push('Why I bought this');if(!f.breakCondition)missing.push('What would prove me wrong');if(missing.length){setValidation(`Please complete: ${missing.join(', ')}`);return;}onSave({...f,ticker:f.ticker.toUpperCase(),entryPrice:Number(f.entryPrice),amount:Number(f.amount),target:f.target?Number(f.target):null,reviewPlan:Number(f.reviewPlan)})}
+  return <form className="panel form" onSubmit={submit}><header className="head"><div><h1>New Decision</h1><p>Write the reason before the market rewrites it for you.</p></div></header>{validation&&<div className="error">{validation}</div>}<div className="grid2"><Field label="Ticker *"><input value={f.ticker} onChange={e=>set('ticker',e.target.value)}/></Field><Field label="Company"><input value={f.company} onChange={e=>set('company',e.target.value)}/></Field><Field label="Buy date"><input type="date" value={f.buyDate} onChange={e=>set('buyDate',e.target.value)}/></Field><Field label="Entry price *"><input type="number" step="0.01" value={f.entryPrice} onChange={e=>set('entryPrice',e.target.value)}/></Field><Field label="Amount invested *"><input type="number" step="0.01" value={f.amount} onChange={e=>set('amount',e.target.value)}/></Field><Field label="Time horizon"><input value={f.horizon} onChange={e=>set('horizon',e.target.value)}/></Field><Field label="Review every"><select value={f.reviewPlan} onChange={e=>set('reviewPlan',e.target.value)}><option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option></select></Field><Field label="Target price"><input type="number" step="0.01" value={f.target} onChange={e=>set('target',e.target.value)}/></Field></div><Field label="Why did I buy this? *"><textarea value={f.thesis} onChange={e=>set('thesis',e.target.value)}/></Field><Field label="Expected outcome"><textarea value={f.expected} onChange={e=>set('expected',e.target.value)}/></Field><Field label="What would prove me wrong? *"><textarea className="dangerinput" value={f.breakCondition} onChange={e=>set('breakCondition',e.target.value)}/></Field><div className="actions"><button type="button" className="ghost" onClick={onCancel}>Cancel</button><button className="primary">Save Decision</button></div></form>
+}
+
+function DecisionCard({p,onBack,onReview}){
+  const latest=p.reviews?.[0];const d=daysUntil(p.nextReview);const reviewText=d==null?'No review scheduled':d<=0?'Review due now':`Review in ${d} day${d===1?'':'s'}`;
+  return <><header className="head"><div><button className="link" onClick={onBack}>← Back to portfolio</button><h1>{p.ticker}</h1><p>{p.company||'Company name not set'}</p></div><button className="primary" onClick={onReview}>Add Review</button></header>
+    <section className="decisionhero"><div><span>Current decision</span><strong>{p.decision}</strong></div><div><span>Thesis status</span><Status value={p.thesisStatus}/></div><div><span>Next review</span><strong className={d<=0?'dangertext':''}>{reviewText}</strong></div></section>
+    <div className="grid2"><section className="panel"><h2>Investment thesis</h2><p className="bigcopy">{p.thesis}</p><h3>Expected outcome</h3><p>{p.expected||'Not recorded'}</p></section><section className="panel"><h2>What would prove me wrong?</h2><div className="riskbox">{p.breakCondition}</div><div className="facts"><span>Entry <b>${p.entryPrice.toFixed(2)}</b></span><span>Amount <b>${p.amount.toLocaleString()}</b></span><span>Target <b>{p.target?`$${p.target}`:'—'}</b></span><span>Horizon <b>{p.horizon||'—'}</b></span></div></section></div>
+    <section className="panel evidence"><h2>Latest evidence</h2>{!latest?<p className="muted">No review evidence yet. Add a review to start building the evidence trail.</p>:<div className="grid2"><div className="evidencebox good"><h3>Supports thesis</h3><p>{latest.evidenceFor||'None recorded'}</p></div><div className="evidencebox bad"><h3>Weakens thesis</h3><p>{latest.evidenceAgainst||'None recorded'}</p></div><div className="evidencebox fullrow"><h3>What would change my mind?</h3><p>{latest.changeMind||'None recorded'}</p></div></div>}</section>
+    <section className="panel"><h2>Decision history</h2>{p.reviews.length===0?<p className="muted">No reviews yet.</p>:p.reviews.map(r=><div className="history" key={r.id}><b>{r.date}</b><Status value={r.thesisStatus}/><span>{r.decision}</span><span>{r.changed}</span></div>)}</section></>
+}
+
+function Review({p,onSave,onCancel}){
+  const [f,setF]=useState({changed:'',thesisStatus:p.thesisStatus,risk:'About the same',buyAgain:'Maybe',evidenceFor:'',evidenceAgainst:'',changeMind:'',decision:p.decision,notes:''});
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  return <form className="panel form" onSubmit={e=>{e.preventDefault();onSave(f)}}><header className="head"><div><h1>Review: {p.ticker}</h1><p>Separate evidence from emotion before choosing what to do next.</p></div></header><Field label="1. What changed since the last review?"><textarea required value={f.changed} onChange={e=>set('changed',e.target.value)}/></Field><div className="grid2"><Field label="2. Evidence that supports the thesis"><textarea value={f.evidenceFor} onChange={e=>set('evidenceFor',e.target.value)} placeholder="Results, guidance, execution, industry data…"/></Field><Field label="3. Evidence that weakens the thesis"><textarea value={f.evidenceAgainst} onChange={e=>set('evidenceAgainst',e.target.value)} placeholder="Misses, delays, dilution, competition, new risks…"/></Field></div><Field label="4. What evidence would change my mind?"><textarea value={f.changeMind} onChange={e=>set('changeMind',e.target.value)} placeholder="Define the next fact that would make you reconsider."/></Field><div className="grid2"><Field label="5. Thesis status"><select value={f.thesisStatus} onChange={e=>set('thesisStatus',e.target.value)}><option>STRENGTHENING</option><option>VALID</option><option>WEAKENING</option><option>BROKEN</option></select></Field><Field label="6. Downside risk"><select value={f.risk} onChange={e=>set('risk',e.target.value)}><option>Lower risk now</option><option>About the same</option><option>Higher risk now</option></select></Field><Field label="7. Would I buy today?"><select value={f.buyAgain} onChange={e=>set('buyAgain',e.target.value)}><option>Yes</option><option>Maybe</option><option>No</option></select></Field></div><Field label="8. My decision"><div className="decisionbuttons">{['BUY MORE','HOLD','REDUCE','EXIT'].map(x=><button type="button" key={x} className={f.decision===x?'selected':''} onClick={()=>set('decision',x)}>{x}</button>)}</div></Field><Field label="Notes"><textarea value={f.notes} onChange={e=>set('notes',e.target.value)}/></Field><div className="actions"><button type="button" className="ghost" onClick={onCancel}>Cancel</button><button className="primary">Save Review</button></div></form>
+}
+
+createRoot(document.getElementById('root')).render(<App/>);
