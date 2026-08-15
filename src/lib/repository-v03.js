@@ -7,10 +7,14 @@ const addDays = (date, days) => {
   return d.toISOString().slice(0, 10);
 };
 
+const firstRelation = (value) => Array.isArray(value) ? value[0] : value || null;
+const relationArray = (value) => Array.isArray(value) ? value : value ? [value] : [];
+
 const mapPosition = (row) => {
-  const thesis = row.theses?.[0];
-  const versions = [...(thesis?.thesis_versions || [])].sort((a,b) => b.version_number - a.version_number);
-  const reviews = [...(row.reviews || [])].sort((a,b) => String(b.review_date).localeCompare(String(a.review_date)));
+  const thesis = firstRelation(row.theses);
+  const versions = relationArray(thesis?.thesis_versions).sort((a,b) => b.version_number - a.version_number);
+  const breaks = relationArray(thesis?.break_conditions);
+  const reviews = relationArray(row.reviews).sort((a,b) => String(b.review_date).localeCompare(String(a.review_date)));
   return {
     id: row.id,
     ticker: row.ticker,
@@ -27,7 +31,7 @@ const mapPosition = (row) => {
     thesisId: thesis?.id || null,
     thesis: versions[0]?.thesis_text || '',
     expected: versions[0]?.expected_outcome || '',
-    breakCondition: thesis?.break_conditions?.[0]?.condition_text || '',
+    breakCondition: breaks[0]?.condition_text || '',
     reviews: reviews.map((r) => ({
       id: r.id,
       date: r.review_date,
@@ -39,7 +43,7 @@ const mapPosition = (row) => {
       evidenceAgainst: r.evidence_against || '',
       changeMind: r.what_would_change_my_mind || '',
       notes: r.notes || '',
-      decision: r.decisions?.[0]?.decision || row.current_decision,
+      decision: firstRelation(r.decisions)?.decision || row.current_decision,
     })),
   };
 };
