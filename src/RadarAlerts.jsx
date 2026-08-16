@@ -22,16 +22,35 @@ function decisionSummary(a){
   const tone=entry==='BUY ZONE'?'go':entry==='AVOID'||entry==='CROWDED'||entry==='EXTENDED'?'stop':'wait';
   return {interesting,canBuy,tone};
 }
+function easyExplanation(a){
+  const score=Number(a.radar_score||0);
+  const stage=t(TH.stage,a.stage);
+  const entry=t(TH.entry,a.entry_status||'WAIT FOR CONFIRMATION');
+  const thesis=t(TH.thesis,a.thesis_direction||'UNCHANGED');
+  const action=a.current_action==='BUY'?'พิจารณาซื้อ':a.current_action==='ADD'?'พิจารณาเพิ่ม':a.current_action==='REDUCE'?'พิจารณาลด':a.current_action==='SELL'?'พิจารณาขาย':'เฝ้าดูก่อน';
+  const scoreExplain=score>=85?'มีสัญญาณดีหลายอย่างเกิดพร้อมกัน จึงควรเอาเวลาไปศึกษาต่อ':score>=80?'มีข้อมูลดีพอให้จับตาอย่างจริงจัง แต่ยังไม่ใช่คำสั่งซื้อ':'ยังอยู่ในระดับเฝ้าดู';
+  const entryExplain=a.entry_status==='WAIT FOR PULLBACK'?'หุ้นอาจดี แต่ราคาวิ่งรับข่าวไปแล้ว การรอให้ราคาย่อลงอาจทำให้ Risk/Reward ดีขึ้น':a.entry_status==='WAIT FOR CONFIRMATION'?'เรื่องราวน่าสนใจ แต่เรายังอยากเห็นหลักฐานเพิ่มก่อนเอาเงินจริงเข้า':a.entry_status==='BUY ZONE'?'ราคาและข้อมูลเริ่มเข้าเงื่อนไขที่ควรพิจารณาซื้อ แต่ยังต้องดู Position Size และความเสี่ยง':'ยังไม่ใช่จังหวะที่ระบบอยากให้รีบเข้า';
+  return [
+    {title:`1. ${a.ticker} คือหุ้นที่ Radar อยากให้เราหยุดดู`,body:`คะแนน ${score}/100 หมายถึง “สถานการณ์น่าสนใจแค่ไหน” ไม่ได้แปลว่าหุ้นจะขึ้น ${score}% และไม่ได้แปลว่าต้องซื้อทันที`},
+    {title:`2. ${stage} หมายความว่าอะไร`,body:a.stage==='CONFIRMED'?'Story เริ่มมีหลักฐานจริงรองรับแล้ว ไม่ได้มีแค่คำพูดหรือกระแส':a.stage==='EARLY'?'เราเริ่มเห็นสัญญาณบางอย่าง แต่หลักฐานยังไม่ครบ':'ตลาดรับรู้ Story นี้มากแล้ว จึงต้องระวังว่าราคาสะท้อนข่าวไปเยอะแล้ว'},
+    {title:'3. ทำไมวันนี้ถึงเข้า Radar',body:a.what_changed||'มีข้อมูลใหม่ที่ทำให้มุมมองต่อบริษัทเปลี่ยนไป'},
+    {title:'4. ทำไมยังไม่ควรรีบซื้อ',body:`สถานะ Entry คือ “${entry}” เพราะ ${entryExplain}`},
+    {title:'5. ต้องรออะไรต่อ',body:a.key_trigger||'รอข้อมูลใหม่ที่ยืนยันว่า Thesis เดิมยังเดินหน้าต่อ'},
+    {title:'6. อะไรทำให้เรื่องนี้พังได้',body:a.stop_or_thesis_exit||a.primary_risk||a.bear_case||'ยังไม่มีข้อมูลความเสี่ยงที่ชัดเจน'},
+    {title:'7. ตอนนี้เราควรทำอะไร',body:`${action} · ${thesis} · ${scoreExplain}`}
+  ];
+}
 
 export default function RadarAlerts(){
-  const [alerts,setAlerts]=useState(DEMO_ALERTS),[selectedId,setSelectedId]=useState(DEMO_ALERTS[0].id),[loading,setLoading]=useState(false),[error,setError]=useState(''),[filter,setFilter]=useState('ALL');
+  const [alerts,setAlerts]=useState(DEMO_ALERTS),[selectedId,setSelectedId]=useState(DEMO_ALERTS[0].id),[loading,setLoading]=useState(false),[error,setError]=useState(''),[filter,setFilter]=useState('ALL'),[easyOpen,setEasyOpen]=useState(false);
   useEffect(()=>{if(!isSupabaseConfigured)return;let alive=true;setLoading(true);listRadarAlerts().then(rows=>{if(alive&&rows.length){setAlerts(rows);setSelectedId(rows[0].id)}}).catch(e=>alive&&setError(`ยังโหลดข้อมูล Radar ไม่สำเร็จ: ${e.message}`)).finally(()=>alive&&setLoading(false));return()=>{alive=false}},[]);
   const filtered=useMemo(()=>filter==='ALL'?alerts:alerts.filter(a=>a.stage===filter),[alerts,filter]);
   const selected=alerts.find(a=>a.id===selectedId)||filtered[0]||alerts[0];
   const due=alerts.flatMap(a=>(a.radar_followups||[]).map(f=>({...f,ticker:a.ticker}))).filter(f=>!f.completed).sort((a,b)=>a.checkpoint_date.localeCompare(b.checkpoint_date));
   const priorityCount=alerts.filter(a=>Number(a.radar_score)>=80).length,strongerCount=alerts.filter(a=>a.thesis_direction==='STRONGER').length;
-  const selectAlert=id=>{setSelectedId(id);if(window.innerWidth<=720)setTimeout(()=>document.querySelector('.radar-detail')?.scrollIntoView({behavior:'smooth',block:'start'}),60)};
+  const selectAlert=id=>{setSelectedId(id);setEasyOpen(false);if(window.innerWidth<=720)setTimeout(()=>document.querySelector('.radar-detail')?.scrollIntoView({behavior:'smooth',block:'start'}),60)};
   const decision=selected?decisionSummary(selected):null;
+  const easy=selected?easyExplanation(selected):[];
   return <div className="radar-page">
     <div className="page-head radar-head"><div><h1>Radar หุ้น</h1><p>คัดโอกาส แยกคุณภาพหุ้นออกจากจังหวะเข้า และติดตามผลทุก Alert ถึง +90 วัน</p></div><div className="radar-live"><span></span>{loading?'กำลังโหลด':isSupabaseConfigured?'เชื่อมต่อ Supabase แล้ว':'โหมดตัวอย่าง'}</div></div>
     {error&&<div className="radar-warning">{error} ระบบจะแสดงข้อมูลตัวอย่างชั่วคราว</div>}
@@ -43,7 +62,7 @@ export default function RadarAlerts(){
         <div className="radar-detail-head"><div><span className="eyebrow">{selected.theme||selected.sector||'หุ้นสหรัฐฯ'}</span><h2>{selected.ticker} <small>{selected.company}</small></h2></div><div className={`radar-score large ${scoreClass(Number(selected.radar_score))}`}><strong>{Number(selected.radar_score).toFixed(0)}</strong><span>/100</span></div></div>
         <div className="radar-badge-line"><Badge tone={selected.stage?.toLowerCase()}>{t(TH.stage,selected.stage)}</Badge><Badge tone="priority">{t(TH.verdict,selected.verdict)}</Badge><Badge>{t(TH.entry,selected.entry_status||'ENTRY UNSET')}</Badge><Badge tone={selected.thesis_direction==='STRONGER'?'stronger':''}>{t(TH.thesis,selected.thesis_direction||'UNCHANGED')}</Badge></div>
         <div className="radar-decision-card">
-          <div className="decision-card-title"><div><span>Decision Card</span><h3>สรุปให้ตัดสินใจใน 20 วินาที</h3></div><Badge tone={selected.thesis_direction==='STRONGER'?'stronger':''}>{t(TH.thesis,selected.thesis_direction||'UNCHANGED')}</Badge></div>
+          <div className="decision-card-title"><div><span>การ์ดตัดสินใจ</span><h3>สรุปให้ตัดสินใจใน 20 วินาที</h3></div><Badge tone={selected.thesis_direction==='STRONGER'?'stronger':''}>{t(TH.thesis,selected.thesis_direction||'UNCHANGED')}</Badge></div>
           <div className="decision-card-grid">
             <article><span>น่าสนใจไหม</span><strong>{decision.interesting}</strong><small>Radar Score {Number(selected.radar_score).toFixed(0)}/100 · {t(TH.stage,selected.stage)}</small></article>
             <article className={decision.tone}><span>ซื้อได้หรือยัง</span><strong>{decision.canBuy}</strong><small>{selected.entry_reason||t(TH.entry,selected.entry_status)}</small></article>
@@ -51,7 +70,13 @@ export default function RadarAlerts(){
             <article className="risk"><span>อะไรทำให้ Thesis พัง</span><strong>Risk / Thesis Breaker</strong><small>{selected.stop_or_thesis_exit||selected.primary_risk||selected.bear_case||'ยังไม่มีข้อมูล'}</small></article>
           </div>
           <div className="decision-card-bottom"><div><span>Action ตอนนี้</span><strong>{selected.current_action||'WATCH'}</strong></div><div><span>จังหวะเข้า</span><strong>{t(TH.entry,selected.entry_status||'Not set')}</strong></div></div>
+          <button type="button" className="easy-explain-button" onClick={()=>setEasyOpen(v=>!v)}>{easyOpen?'ซ่อนคำอธิบาย':'? อธิบายให้เข้าใจง่าย'}</button>
         </div>
+        {easyOpen&&<div className="easy-explain-panel">
+          <div className="easy-explain-head"><div><span>โหมดเข้าใจง่าย</span><h3>ถ้าอายุ 13 ปี เราควรอ่าน {selected.ticker} แบบนี้</h3></div><button type="button" onClick={()=>setEasyOpen(false)}>ปิด</button></div>
+          <div className="easy-explain-list">{easy.map((item,i)=><article key={i}><h4>{item.title}</h4><p>{item.body}</p></article>)}</div>
+          <div className="easy-bottom-line"><strong>สรุปสั้นที่สุด</strong><p>{selected.ticker} น่าสนใจเพราะมีสิ่งใหม่เกิดขึ้นกับธุรกิจ แต่ Radar ยังแยก “หุ้นน่าสนใจ” ออกจาก “ควรซื้อเดี๋ยวนี้” เสมอ ให้รอ Key Trigger และจังหวะ Entry ตามที่ระบบระบุ</p></div>
+        </div>}
         <div className="radar-mobile-callout"><span>สถานะตอนนี้</span><strong>{t(TH.entry,selected.entry_status||'ENTRY UNSET')}</strong><small>{selected.entry_reason||'ดู Key Trigger ก่อนตัดสินใจเข้า Position'}</small></div>
         <div className="radar-detail-grid"><article><h3>อะไรเปลี่ยนไป</h3><p>{selected.what_changed||'—'}</p></article><article><h3>Story / Narrative</h3><p>{selected.story||selected.emerging_narrative||'—'}</p></article><article><h3>Key Trigger ที่ต้องรอ</h3><p>{selected.key_trigger||'—'}</p></article><article><h3>ความเสี่ยงหลัก</h3><p>{selected.primary_risk||selected.bear_case||'—'}</p></article></div>
         <div className="decision-strip"><div><span>วันที่แจ้งเตือน</span><strong>{fmtDate(selected.alert_time)}</strong></div><div><span>ราคาตอน Alert</span><strong>{selected.price_at_alert?`$${Number(selected.price_at_alert).toFixed(2)}`:'ยังไม่ได้บันทึก'}</strong></div><div><span>จังหวะเข้า</span><strong>{t(TH.entry,selected.entry_status||'Not set')}</strong></div><div><span>Action</span><strong>{selected.current_action||'WATCH'}</strong></div></div>
