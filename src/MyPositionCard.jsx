@@ -8,9 +8,8 @@ const today=()=>new Date().toISOString().slice(0,10);
 const money=v=>v!==null&&v!==undefined&&v!==''?`$${Number(v).toFixed(2)}`:'—';
 
 export default function MyPositionCard({alert,onSaved}){
-  const[positions,setPositions]=useState([]),[editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[error,setError]=useState('');
+  const[positions,setPositions]=useState([]),[saving,setSaving]=useState(false),[error,setError]=useState('');
   const[form,setForm]=useState({buyDate:today(),entryPrice:'',amount:'',pendingBuyPrice:'',pendingBuyAmount:''});
-
   const current=useMemo(()=>positions.find(p=>p.ticker===alert?.ticker&&!p.closedAt),[positions,alert?.ticker]);
 
   async function refresh(){
@@ -19,8 +18,8 @@ export default function MyPositionCard({alert,onSaved}){
   }
 
   useEffect(()=>{refresh()},[alert?.ticker]);
-
   const set=(k,v)=>setForm(x=>({...x,[k]:v}));
+
   const submit=async e=>{
     e.preventDefault();
     if(!form.entryPrice||!form.amount)return;
@@ -36,8 +35,7 @@ export default function MyPositionCard({alert,onSaved}){
         pendingBuyAmount:form.pendingBuyAmount?Number(form.pendingBuyAmount):null,
       });
       const rows=await listRadarPositions();
-      setPositions(rows);setEditing(false);
-      onSaved?.(rows);
+      setPositions(rows);onSaved?.(rows);
     }catch(e){setError(e.message)}finally{setSaving(false)}
   };
 
@@ -47,7 +45,7 @@ export default function MyPositionCard({alert,onSaved}){
   return <div className="my-position">
     <div className="mp-head"><div><span>MY POSITION</span><h3>Position จริงของฉัน</h3></div>{current&&<span className="mp-open">OPEN</span>}</div>
     {error&&<div className="mp-error">{error}</div>}
-    {current&&!editing?<>
+    {current?<>
       <div className="mp-grid">
         <article><span>Avg Cost</span><strong>{money(current.entryPrice)}</strong><small>วันที่ซื้อ {current.buyDate}</small></article>
         <article><span>Shares</span><strong>{Number(current.shares).toFixed(4)}</strong><small>คำนวณจากเงินลงทุน ÷ Avg Cost</small></article>
@@ -59,7 +57,6 @@ export default function MyPositionCard({alert,onSaved}){
         <div><span>TP1</span><strong>{money(alert.take_profit_1_price)}</strong></div>
         <div><span>TP2</span><strong>{money(alert.take_profit_2_price)}</strong></div>
       </div>
-      <button type="button" className="mp-secondary" onClick={()=>setEditing(true)}>แก้ไข / เพิ่มข้อมูล</button>
     </>:<form className="mp-form" onSubmit={submit}>
       <div className="mp-form-grid">
         <label><span>วันที่ซื้อ</span><input type="date" value={form.buyDate} onChange={e=>set('buyDate',e.target.value)}/></label>
@@ -69,8 +66,7 @@ export default function MyPositionCard({alert,onSaved}){
         <label><span>Pending Buy เงิน</span><input inputMode="decimal" type="number" step="0.01" value={form.pendingBuyAmount} onChange={e=>set('pendingBuyAmount',e.target.value)} placeholder="200"/></label>
       </div>
       <div className="mp-preview"><span>จำนวนหุ้นโดยประมาณ</span><strong>{form.entryPrice&&form.amount?(Number(form.amount)/Number(form.entryPrice)).toFixed(4):'—'}</strong></div>
-      <div className="mp-actions">{current&&<button type="button" className="mp-secondary" onClick={()=>setEditing(false)}>ยกเลิก</button>}<button className="mp-primary" disabled={saving}>{saving?'กำลังบันทึก…':'บันทึก Position จริง'}</button></div>
+      <div className="mp-actions"><button className="mp-primary" disabled={saving}>{saving?'กำลังบันทึก…':'บันทึก Position จริง'}</button></div>
     </form>}
-    {!current&&!editing&&<button type="button" className="mp-primary" onClick={()=>setEditing(true)}>+ บันทึก Position จริง</button>}
   </div>;
 }
