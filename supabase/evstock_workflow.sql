@@ -20,8 +20,14 @@ create index if not exists evstock_runs_user_ticker_idx
 
 alter table public.evstock_runs enable row level security;
 
+grant select, insert, update, delete on public.evstock_runs to authenticated;
+
+drop policy if exists "evstock_runs_owner_all" on public.evstock_runs;
 create policy "evstock_runs_owner_all" on public.evstock_runs
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 comment on table public.evstock_runs is
   'Immutable snapshots produced by the EVSTOCK research workflow. Keep historical runs instead of overwriting them.';
