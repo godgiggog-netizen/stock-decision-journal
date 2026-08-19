@@ -41,7 +41,7 @@ export default function MyPositionCard({alert,onSaved}){
   };
 
   if(!alert)return null;
-  if(!isSupabaseConfigured)return <><div className="my-position"><div className="mp-head"><div><span>MY POSITION</span><h3>Position จริงของฉัน</h3></div></div><p className="mp-muted">ต้องเชื่อมต่อ Supabase ก่อนจึงจะบันทึก Position จริงได้</p></div><InvestmentCommittee alert={alert}/></>;
+  if(!isSupabaseConfigured)return <><div className="my-position"><div className="mp-head"><div><span>MY POSITION</span><h3>Position จริงของฉัน</h3></div></div><p className="mp-muted">ต้องเชื่อมต่อ Supabase ก่อนจึงจะบันทึก Position จริงได้</p></div><InvestmentCommittee alert={alert} position={null}/></>;
 
   return <>
     <div className="my-position">
@@ -71,6 +71,6 @@ export default function MyPositionCard({alert,onSaved}){
         <div className="mp-actions"><button className="mp-primary" disabled={saving}>{saving?'กำลังบันทึก…':'บันทึก Position จริง'}</button></div>
       </form>}
     </div>
-    <InvestmentCommittee alert={alert}/>
+    <InvestmentCommittee alert={alert} position={current||null}/>
   </>;
 }
