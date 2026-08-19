@@ -1,48 +1,52 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { parseEvstockCommand, reportToRadarAlert, decisionLabel } from './evstockEngine';
+import { reportToRadarAlert, decisionLabel } from './evstockEngine';
 import './evstock.css';
 
 function App() {
-  const [command, setCommand] = useState('Evstock HIVE USD');
+  const [raw, setRaw] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState(null);
   const [saved, setSaved] = useState('');
 
-  async function run(e) {
+  const samplePrompt = useMemo(() => `Evstock HIVE USD\n\nส่งผลลัพธ์เป็น EVSTOCK JSON สำหรับนำเข้า Stock Decision Journal โดยต้องมีอย่างน้อย: ticker, company, currency, as_of, status, model, summary, narrative, what_changed, market, valuation, deep, radar, decision, bull_case, bear_case, thesis_breakers, sources`, []);
+
+  function importReport(e) {
     e.preventDefault();
     setError(''); setSaved(''); setReport(null);
-    const parsed = parseEvstockCommand(command);
-    if (!parsed) return setError('ใช้รูปแบบ: Evstock HIVE USD');
-    if (!isSupabaseConfigured) return setError('ยังไม่ได้ตั้งค่า Supabase ใน .env.local');
     try {
-      setBusy(true);
-      const { data: auth } = await supabase.auth.getSession();
-      if (!auth.session?.user) throw new Error('กรุณา Sign in ใน Stock Decision Journal ก่อน');
-      const { data, error: fnError } = await supabase.functions.invoke('evstock', { body: parsed });
-      if (fnError) throw fnError;
-      if (!data?.report) throw new Error(data?.error || 'EVSTOCK ไม่ได้ส่งรายงานกลับมา');
-      setReport(data.report);
-    } catch (err) { setError(err.message || String(err)); }
-    finally { setBusy(false); }
+      const parsed = JSON.parse(raw.trim());
+      if (!parsed?.ticker) throw new Error('JSON ต้องมี ticker');
+      if (!parsed?.decision) throw new Error('JSON ต้องมี decision');
+      if (!Array.isArray(parsed.sources)) parsed.sources = [];
+      setReport(parsed);
+    } catch (err) {
+      setError(`นำเข้าไม่ได้: ${err.message || String(err)}`);
+    }
   }
 
   async function saveRun() {
     try {
       setBusy(true); setError(''); setSaved('');
+      if (!isSupabaseConfigured) throw new Error('ยังไม่ได้ตั้งค่า Supabase');
       const { data: auth } = await supabase.auth.getSession();
       const user = auth.session?.user;
-      if (!user) throw new Error('Session หมดอายุ กรุณา Sign in ใหม่');
+      if (!user) throw new Error('กรุณา Sign in ใน Stock Decision Journal ก่อน');
       const sources = (report.sources || []).map((s) => s.url).filter(Boolean);
       const { error: insertError } = await supabase.from('evstock_runs').insert({
-        user_id: user.id, ticker: report.ticker, currency: report.currency || 'USD',
-        status: report.status || 'COMPLETED', model: report.model || null,
-        as_of: report.as_of || new Date().toISOString(), report_json: report, source_urls: sources,
+        user_id: user.id,
+        ticker: report.ticker,
+        currency: report.currency || 'USD',
+        status: report.status || 'COMPLETED',
+        model: report.model || 'ChatGPT/Codex',
+        as_of: report.as_of || new Date().toISOString(),
+        report_json: report,
+        source_urls: sources,
       });
       if (insertError) throw insertError;
-      setSaved('บันทึก EVSTOCK snapshot แล้ว');
+      setSaved('บันทึก EVSTOCK Snapshot แล้ว');
     } catch (err) { setError(err.message || String(err)); }
     finally { setBusy(false); }
   }
@@ -50,9 +54,10 @@ function App() {
   async function sendToRadar() {
     try {
       setBusy(true); setError(''); setSaved('');
+      if (!isSupabaseConfigured) throw new Error('ยังไม่ได้ตั้งค่า Supabase');
       const { data: auth } = await supabase.auth.getSession();
       const user = auth.session?.user;
-      if (!user) throw new Error('Session หมดอายุ กรุณา Sign in ใหม่');
+      if (!user) throw new Error('กรุณา Sign in ใน Stock Decision Journal ก่อน');
       const payload = { ...reportToRadarAlert(report), user_id: user.id };
       const { error: insertError } = await supabase.from('radar_alerts').insert(payload);
       if (insertError) throw insertError;
@@ -63,16 +68,36 @@ function App() {
 
   const card = report ? decisionLabel(report) : null;
   return <main className="ev-shell">
-    <header className="ev-head"><div><a href="/">← Stock Decision Journal</a><h1>EVSTOCK Workflow</h1><p>Research → Valuation → Technical → Decision → Journal</p></div><span className="vtag">V1</span></header>
-    <form className="command" onSubmit={run}><input value={command} onChange={(e) => setCommand(e.target.value)} aria-label="EVSTOCK command"/><button disabled={busy}>{busy ? 'กำลังวิเคราะห์…' : 'RUN'}</button></form>
-    <p className="hint">ตัวอย่าง: <code>Evstock HIVE USD</code> · ระบบต้องมี OPENAI_API_KEY ใน Supabase Edge Function secrets</p>
+    <header className="ev-head">
+      <div><a href="/">← Stock Decision Journal</a><h1>EVSTOCK Import</h1><p>ChatGPT/Codex Research → Import JSON → Journal → Follow-up</p></div>
+      <span className="vtag">V1B</span>
+    </header>
+
+    <section className="panel">
+      <h3>1. วิเคราะห์ใน ChatGPT/Codex</h3>
+      <p>ใช้คำสั่งเดิม เช่น <code>Evstock HIVE USD</code> แล้วขอผลลัพธ์เป็น EVSTOCK JSON</p>
+      <textarea readOnly value={samplePrompt} aria-label="EVSTOCK prompt template" />
+      <p className="hint">โหมดนี้ไม่เรียก OpenAI API จาก Supabase จึงไม่มีค่า API เพิ่มจากหน้า Journal</p>
+    </section>
+
+    <form className="panel form" onSubmit={importReport}>
+      <h3>2. วาง EVSTOCK JSON</h3>
+      <textarea value={raw} onChange={(e) => setRaw(e.target.value)} placeholder='วาง JSON ที่ได้จาก ChatGPT/Codex ที่นี่' aria-label="EVSTOCK JSON" />
+      <div className="actions"><button className="primary" disabled={busy || !raw.trim()}>นำเข้ารายงาน</button></div>
+    </form>
+
     {error && <div className="msg err">{error}</div>}
     {saved && <div className="msg ok">{saved}</div>}
 
     {report && <>
       <section className="decision">
-        <div><small>{report.ticker} · {report.company}</small><h2>{card.action}</h2><p>{report.decision?.reason}</p></div>
-        <div className="decision-grid"><Metric k="ราคาอ้างอิง" v={report.market?.price != null ? `$${report.market.price}` : 'N/A'} /><Metric k="Entry Zone" v={card.entry} /><Metric k="Target" v={card.target} /><Metric k="Confidence" v={card.confidence} /></div>
+        <div><small>{report.ticker} · {report.company || ''}</small><h2>{card.action}</h2><p>{report.decision?.reason}</p></div>
+        <div className="decision-grid">
+          <Metric k="ราคาอ้างอิง" v={report.market?.price != null ? `$${report.market.price}` : 'N/A'} />
+          <Metric k="Entry Zone" v={card.entry} />
+          <Metric k="Target" v={card.target} />
+          <Metric k="Confidence" v={card.confidence} />
+        </div>
       </section>
 
       <section className="grid">
