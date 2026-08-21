@@ -2,6 +2,7 @@ import React,{useEffect,useMemo,useState}from'react';
 import{isSupabaseConfigured}from'./lib/supabase';
 import{getSession}from'./lib/repository-v03';
 import{createRadarPosition,listRadarPositions}from'./lib/radarPositionRepository';
+import{subscribeTable}from'./lib/cloudSync';
 import InvestmentCommittee from'./InvestmentCommittee';
 import'./myPosition.css';
 
@@ -9,23 +10,30 @@ const today=()=>new Date().toISOString().slice(0,10);
 const money=v=>v!==null&&v!==undefined&&v!==''?`$${Number(v).toFixed(2)}`:'—';
 
 export default function MyPositionCard({alert,onSaved}){
-  const[positions,setPositions]=useState([]),[saving,setSaving]=useState(false),[error,setError]=useState('');
+  const[positions,setPositions]=useState([]),[saving,setSaving]=useState(false),[error,setError]=useState(''),[syncStatus,setSyncStatus]=useState(isSupabaseConfigured?'กำลัง Sync':'เฉพาะเครื่องนี้');
   const[form,setForm]=useState({buyDate:today(),entryPrice:'',amount:'',pendingBuyPrice:'',pendingBuyAmount:''});
   const current=useMemo(()=>positions.find(p=>p.ticker===alert?.ticker&&!p.closedAt),[positions,alert?.ticker]);
 
   async function refresh(){
     if(!isSupabaseConfigured||!alert)return;
-    try{setError('');setPositions(await listRadarPositions())}catch(e){setError(e.message)}
+    try{setSyncStatus('กำลัง Sync');setError('');const rows=await listRadarPositions();setPositions(rows);onSaved?.(rows);setSyncStatus('✓ Synced')}catch(e){setError(e.message);setSyncStatus('Sync มีปัญหา')}
   }
 
-  useEffect(()=>{refresh()},[alert?.ticker]);
+  useEffect(()=>{
+    refresh();
+    const unsubscribe=subscribeTable('positions',()=>refresh());
+    const onVisible=()=>{if(document.visibilityState==='visible')refresh()};
+    window.addEventListener('focus',refresh);
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{unsubscribe();window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',onVisible)};
+  },[alert?.ticker]);
   const set=(k,v)=>setForm(x=>({...x,[k]:v}));
 
   const submit=async e=>{
     e.preventDefault();
     if(!form.entryPrice||!form.amount){setError('กรุณากรอกราคาเฉลี่ยและเงินลงทุนก่อนบันทึก');return;}
     try{
-      setSaving(true);setError('');
+      setSaving(true);setSyncStatus('กำลัง Sync');setError('');
       const session=await getSession();
       if(!session?.user)throw new Error('กรุณา Sign in ก่อนบันทึก Position');
       await createRadarPosition(session.user.id,alert,{
@@ -35,9 +43,8 @@ export default function MyPositionCard({alert,onSaved}){
         pendingBuyPrice:form.pendingBuyPrice?Number(form.pendingBuyPrice):null,
         pendingBuyAmount:form.pendingBuyAmount?Number(form.pendingBuyAmount):null,
       });
-      const rows=await listRadarPositions();
-      setPositions(rows);onSaved?.(rows);
-    }catch(e){setError(e.message)}finally{setSaving(false)}
+      await refresh();
+    }catch(e){setError(e.message);setSyncStatus('Sync มีปัญหา')}finally{setSaving(false)}
   };
 
   if(!alert)return null;
@@ -45,7 +52,7 @@ export default function MyPositionCard({alert,onSaved}){
 
   return <>
     <div className="my-position">
-      <div className="mp-head"><div><span>MY POSITION</span><h3>Position จริงของฉัน</h3></div>{current&&<span className="mp-open">OPEN</span>}</div>
+      <div className="mp-head"><div><span>MY POSITION</span><h3>Position จริงของฉัน</h3><small className="mp-sync">{syncStatus}</small></div>{current&&<span className="mp-open">OPEN</span>}</div>
       {error&&<div className="mp-error">{error}</div>}
       {current?<>
         <div className="mp-grid">
